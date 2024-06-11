@@ -6,5 +6,5 @@
   "codeowners": ["@fison67"],
   "requirements": [],
   "config_flow": true,
-  "version": "1.0.1"
+  "version": "2024.06.11"
 }
