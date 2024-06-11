@@ -6,6 +6,7 @@ Licensed under MIT
 import requests
 import logging
 import json
+import orjson
 import base64
 import select
 
@@ -32,8 +33,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from homeassistant.helpers.device_registry import (
     CONNECTION_UPNP,
-    async_get as async_get_device_registry,
+    # async_get as async_get_device_registry,
 )
+# from homeassistant.helpers.device_registry import async_get
+from homeassistant.helpers.device_registry import async_get as async_get_device_registry
+from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 from homeassistant.helpers import discovery
 
@@ -72,7 +76,8 @@ class EdgeDriver:
         self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 128)
         self.sock.bind((CONF_MCAST_GRP, CONF_MCAST_PORT))
 
-        self.entity_registry = self.hass.helpers.entity_registry.async_get(self.hass)
+        # self.entity_registry = self.hass.helpers.entity_registry.async_get(self.hass)
+        self.entity_registry = async_get_entity_registry(self.hass)
 
         t = threading.Thread(target=self.initUDP, args=())
         t.start()
@@ -93,26 +98,29 @@ class EdgeDriver:
 
     def processPairing(self, data, addr):
         try:
-            stateList = self.hass.states.async_all()
-
-            content = self.entity_registry._data_to_save()
+            state_list = self.hass.states.async_all()
+    
+            content = orjson.dumps(self.entity_registry._data_to_save())
+            content_json = orjson.loads(content)
             title = 'st_edge_connector.' + data
-            list = []
-            for entity in content["entities"]:
+
+            entity_list = []
+            for entity in content_json["entities"]:
                 entity_id = entity["entity_id"]
                 if entity_id.startswith(title):
-                    origianl_entity_id = data + "." + entity_id[(len(title)+1):len(entity_id)]
-                    targetState = {}
-                    for state in stateList:
-                        if state.entity_id == origianl_entity_id:
-                            targetState = state
+                    original_entity_id = data + "." + entity_id[len(title) + 1:]
+                    target_state = None
+                    for state in state_list:
+                        if state.entity_id == original_entity_id:
+                            target_state = state
                             break
-                    list.append({"id":origianl_entity_id, "attributes": targetState.as_dict()["attributes"]})
-
-            content = json.dumps({"port":self.tcpPort, "data":list})
-            self.sock.sendto(content.encode('UTF-8'), addr)
+                    if target_state:
+                        entity_list.append({"id": original_entity_id, "attributes": target_state.as_dict()["attributes"]})
+    
+            response_content = orjson.dumps({"port": self.tcpPort, "data": entity_list})
+            self.sock.sendto(response_content, addr)
         except Exception as e:
-            logging.error("error: ")
+            logging.error("Error during process_pairing:")
             logging.error(e)
 
     def procesProtocol(self, data, addr):
@@ -147,22 +155,22 @@ class EdgeDriver:
 
     def eventCallback(my, event):
         newState = event.data['new_state']
-        id  = newState.entity_id
-        target = my.entity_registry.async_get(DOMAIN + "." + id.replace(".", "_"))
-        if target is not None:
-            try:
-                deviceMap = my.handler.getDeviceDataMap()
-                if id in deviceMap:
-                    addr = "http://" + deviceMap[id] + "/push-state"
-                    uuid = "http://" + my.ha_addr  + ":" + str(my.ha_port) + "/" + id
-                    data = json.dumps({"uuid":uuid, "time": my.current_milli_time(), "data":newState.state, "attributes": newState.as_dict().get('attributes')}).encode('UTF-8')
-                    # logging.info(data)
-                    res = requests.post(addr, data=data)
-                else :
-                    logging.warn("Non exist edge address: " + id)
-            except Exception as e:
-                logging.error("EventCallback Error: ")
-                logging.error(e)
+        if newState is not None:
+            id  = newState.entity_id
+            target = my.entity_registry.async_get(DOMAIN + "." + id.replace(".", "_"))
+            if target is not None:
+                try:
+                    deviceMap = my.handler.getDeviceDataMap()
+                    if id in deviceMap:
+                        addr = "http://" + deviceMap[id] + "/push-state"
+                        uuid = "http://" + my.ha_addr  + ":" + str(my.ha_port) + "/" + id
+                        data = json.dumps({"uuid":uuid, "time": my.current_milli_time(), "data":newState.state, "attributes": newState.as_dict().get('attributes')}).encode('UTF-8')
+                        res = requests.post(addr, data=data)
+                    # else :
+                    #     logging.warn("Non exist edge address: " + id)
+                except Exception as e:
+                    logging.error("EventCallback Error: ")
+                    logging.error(e)
 
 
 def base_config_schema(config: dict = {}) -> dict:
@@ -205,7 +213,10 @@ async def async_setup_entry(hass, config_entry):
     if conf is None:
         conf = config_entry.data
 
-    device_registry = hass.helpers.device_registry.async_get(hass)
+    # device_registry = await hass.helpers.device_registry.async_get_registry()
+    # device_registry = hass.helpers.device_registry.async_get(hass)
+    device_registry = async_get_device_registry(hass)
+
     device = device_registry.async_get_or_create(
         config_entry_id=config_entry.entry_id,
         connections={(CONNECTION_UPNP, CONNECTIONS_VALUE)},
@@ -324,5 +335,5 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._setError()
         else:
-            logging.warn("Request from " + self.client_address[0])
+            # logging.warn("Request from " + self.client_address[0])
             self._setError()
