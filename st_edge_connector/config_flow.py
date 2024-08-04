@@ -1,4 +1,4 @@
-"""Config flow for K-Weather."""
+"""Config flow for st_edge_connector."""
 import logging
 
 import voluptuous as vol
@@ -7,11 +7,9 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.const import (CONF_SCAN_INTERVAL)
 
-from homeassistant.helpers.device_registry import (
-    CONNECTION_UPNP,
-    async_get as async_get_device_registry,
-)
-
+from homeassistant.helpers.device_registry import CONNECTION_UPNP
+from homeassistant.helpers.device_registry import async_get as async_get_device_registry
+from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 DOMAIN              = 'st_edge_connector'
 
@@ -82,8 +80,8 @@ class HAConnectorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _show_user_form(self, errors=None):
         schema = vol.Schema(
             {
-                vol.Required(CONF_HUB_ADDR, default=None): str,
-                vol.Required(CONF_HA_ADDR, default='192.168.0.100'): str,
+                vol.Required(CONF_HUB_ADDR, default='192.168.219.111'): str,
+                vol.Required(CONF_HA_ADDR, default='192.168.219.130'): str,
                 vol.Required(CONF_HA_PORT, default=20000): int,
             }
         )
@@ -133,13 +131,13 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
             selected = user_input.get(CONF_DEVICE, "").split("[")
             title = selected[1][0:len(selected[1])]
 
-            device_registry = self.hass.helpers.device_registry.async_get()
+            device_registry = async_get_device_registry(self.hass)
             device = device_registry.async_get_device(
                 connections={(CONNECTION_UPNP, CONNECTIONS_VALUE)},
                 identifiers={(DOMAIN, IDENTIFIERS_VALUE)},
             )
 
-            entity_registry = self.hass.helpers.entity_registry.async_get()
+            entity_registry = async_get_entity_registry(self.hass)
             entity = entity_registry.async_get_or_create(
                 DOMAIN,
                 "edge-driver",
